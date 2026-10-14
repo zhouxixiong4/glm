@@ -1,6 +1,6 @@
 /* sw.js — offline support. The app shell is cached at install time (bump VERSION on every release);
  * KaTeX files and generated images are cached the first time they are shown. API calls are never cached. */
-const VERSION = 'glm-v1.1.3';
+const VERSION = 'glm-v1.1.4';
 const RUNTIME = 'glm-runtime-1';
 const SHELL = [
   './', './index.html', './style.css', './boot.js', './config.js', './markdown.js', './app.js', './sandbox.js', './ui-runtime.js', './ui-base.css',

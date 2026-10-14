@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.1.3';
+  const VERSION = '1.1.4';
   const CFG = Object.assign({ apiKey: '', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5.3-flash' }, window.GLM_CONFIG || {});
   const MAX_STEPS = 16; // model calls per answer (each tool round is one)
   const PRICE = { in: 0.8, out: 2.8, cached: 0.23 }; // 元 / 百万 tokens, GLM-5.3-Flash list price
@@ -2245,6 +2245,7 @@
         '<div class="row"><div class="row-line"><div class="row-label">导入备份</div><button class="btn small" id="data-import">导入</button></div></div>' +
         '<div class="row"><div class="row-line"><div class="row-label">清空所有对话</div><button class="btn small danger" id="data-clear">清空</button></div></div>' +
       '</div>' +
+      (updateReady() ? '<p style="text-align:center;margin-top:20px"><button class="btn primary" id="do-update">' + I.down + '有新版本，点此更新</button></p>' : '') +
       '<p class="hint" style="text-align:center;margin-top:24px">GLM 助手 ' + VERSION + ' · 数据只保存在这台设备上<br>AI 也可能出错，重要信息请核实</p>' +
       '</div></div></div>');
     const close = layer(page, () => { renderSidebar(); updateComposer(); if (!state.cur || !state.cur.messages.length) renderThread(); });
@@ -2343,6 +2344,8 @@
       btn.disabled = false;
     });
 
+    const upd = page.querySelector('#do-update');
+    if (upd) upd.addEventListener('click', applyUpdate);
     page.querySelector('#data-export').addEventListener('click', exportAll);
     page.querySelector('#data-import').addEventListener('click', importAll);
     page.querySelector('#data-clear').addEventListener('click', async () => {
@@ -2635,19 +2638,21 @@
       if (hadController && !reloading) { reloading = true; location.reload(); }
     });
     navigator.serviceWorker.register('sw.js').then((reg) => {
-      const offer = () => {
-        if (!reg.waiting || !navigator.serviceWorker.controller) return;
-        toast('有新版本，点这里更新', 12000, () => {
-          if (state.job) { toast('请等当前回答完成后再更新'); return; }
-          reg.waiting.postMessage('skip-waiting');
-        });
-      };
+      swReg = reg;
+      const offer = () => { if (updateReady()) toast('有新版本，点这里更新', 12000, applyUpdate); };
       offer();
       reg.addEventListener('updatefound', () => {
         const w = reg.installing;
         if (w) w.addEventListener('statechange', () => { if (w.state === 'installed') offer(); });
       });
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { reg.update().catch(() => {}); offer(); } });
     }).catch(() => {});
+  }
+  let swReg = null;
+  const updateReady = () => !!(swReg && swReg.waiting && navigator.serviceWorker.controller);
+  function applyUpdate() {
+    if (state.job) { toast('请等当前回答完成后再更新'); return; }
+    if (updateReady()) swReg.waiting.postMessage('skip-waiting');
   }
 
   // ───────────────────────── start ─────────────────────────
