@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.1.2';
+  const VERSION = '1.1.3';
   const CFG = Object.assign({ apiKey: '', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5.3-flash' }, window.GLM_CONFIG || {});
   const MAX_STEPS = 16; // model calls per answer (each tool round is one)
   const PRICE = { in: 0.8, out: 2.8, cached: 0.23 }; // 元 / 百万 tokens, GLM-5.3-Flash list price
@@ -2164,7 +2164,7 @@
       const top = vv ? Math.max(0, vv.offsetTop) : 0;
       D.app.style.transform = top ? 'translateY(' + top + 'px)' : '';
       document.body.classList.toggle('kb', !!vv && window.innerHeight - vv.height > 140);
-      if (stick) D.scroller.scrollTop = D.scroller.scrollHeight;
+      scrollToBottom();
     };
     if (vv) { vv.addEventListener('resize', apply); vv.addEventListener('scroll', apply); }
     window.addEventListener('resize', apply);
