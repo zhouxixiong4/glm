@@ -1,6 +1,5 @@
-/* config.js — defaults for this deployment.
- * Leave apiKey empty when the site is public: the user pastes the key once in 设置 and it stays on the phone.
- * Only fill it in for a private deployment (e.g. reachable only inside your own Tailscale network). */
+/* config.js — defaults for this deployment. The site is public, so apiKey stays empty:
+ * each user pastes their own key once (welcome card or 设置) and it stays on their phone. */
 window.GLM_CONFIG = {
   apiKey: '',
   baseUrl: 'https://open.bigmodel.cn/api/paas/v4',

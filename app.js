@@ -1,14 +1,17 @@
 /* app.js — GLM-5.3-Flash chat, a PWA for iPhone.
  *
  * The phone talks to Zhipu's API directly (no server of ours in between). Chats and attachments live in
- * IndexedDB on the device, settings and the API key in localStorage. Tools the model can call:
- *   run_python / run_javascript — code in a locked-down Web Worker (sandbox.js), for exact math;
- *   web_search                  — Zhipu's web search API.
+ * IndexedDB on the device; settings, memory and the API key in localStorage. Tools the model can call:
+ *   run_python / run_javascript — code in a locked-down Web Worker (sandbox.js);
+ *   web_search / read_webpage   — Zhipu's web search and web reader;
+ *   generate_image              — Zhipu's image models;
+ *   update_memory / search_chats — long-term memory and past conversations, on the device;
+ *   show_ui                     — generative UI, run in sandboxed iframes (ui-runtime.js, ui-base.css).
  */
 (() => {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.1';
   const CFG = Object.assign({ apiKey: '', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5.3-flash' }, window.GLM_CONFIG || {});
   const MAX_STEPS = 16; // model calls per answer (each tool round is one)
   const PRICE = { in: 0.8, out: 2.8, cached: 0.23 }; // 元 / 百万 tokens, GLM-5.3-Flash list price
@@ -79,14 +82,10 @@
     video: svg('<rect x="3" y="6" width="13" height="12" rx="2.5"/><path d="m16 10.5 5-3v9l-5-3"/>'),
     down: svg('<path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/>'),
     share: svg('<path d="M12 3v12M7.5 7.5 12 3l4.5 4.5"/><path d="M5 12v6.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V12"/>'),
-    upload: svg('<path d="M12 20V8M7 12l5-5 5 5M5 4h14"/>'),
     code: svg('<path d="m8 7-5 5 5 5M16 7l5 5-5 5"/>'),
     pen: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
-    book: svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5Z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>'),
     clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
     alert: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>'),
-    key: svg('<circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M17 6l2.5 2.5M14.5 8.5 16.5 10.5"/>'),
-    eye: svg('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>'),
     back: svg('<path d="m15 5-7 7 7 7"/>'),
     layout: svg('<rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M3.5 9h17M9 9v11"/>'),
     expand: svg('<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>'),
@@ -821,7 +820,6 @@
       try {
         b.url = await generateImage(b.prompt, b.size, signal);
         b.status = 'done';
-        job.images++;
         return '图片已生成并展示给用户（' + b.model + '，' + b.size + '）。';
       } catch (e) { fail(b, e); return '画图失败：' + e.message; }
     }
@@ -897,7 +895,7 @@
 
   /** One answer: stream the model, run the tools it asks for, repeat until it answers in text. */
   async function runTurn(conv, msg, v) {
-    const job = { conv, msg, v, ctrl: new AbortController(), cite: 0, searches: 0, images: 0, uiBlocks: new Map() };
+    const job = { conv, msg, v, ctrl: new AbortController(), cite: 0, searches: 0, uiBlocks: new Map() };
     state.job = job;
     updateComposer();
     renderSidebar();
@@ -1087,8 +1085,8 @@
     theme() {
       return S.theme === 'dark' || (S.theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
     },
-    srcdoc(a, b) {
-      const data = JSON.stringify({ id: b.frameId, html: b.html, store: this.store[b.store] || {} })
+    srcdoc(a, b, id) {
+      const data = JSON.stringify({ id, html: b.html, store: this.store[b.store] || {} })
         .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
       return '<!doctype html><html lang="zh-CN" data-theme="' + this.theme() + '"><head><meta charset="utf-8">' +
         '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">' +
@@ -1103,12 +1101,14 @@
         if (!b) return;
         host._ui = { b, m };
         host.style.minHeight = '140px';
+        if (!window.IntersectionObserver) { this.mount(host); return; }
         if (!this.observer) {
           this.observer = new IntersectionObserver((entries) => {
             for (const e of entries) if (e.isIntersecting) { this.observer.unobserve(e.target); this.mount(e.target); }
           }, { root: D.scroller, rootMargin: '600px 0px' });
         }
-        this.observer.observe(host);
+        // the message may still be outside the page; observe once it is in place
+        requestAnimationFrame(() => { if (host.isConnected) this.observer.observe(host); });
       });
     },
     async mount(host, full) {
@@ -1121,9 +1121,9 @@
       frame.setAttribute('title', b.title || '界面');
       frame.setAttribute('loading', 'eager');
       frame.style.height = (full ? '100%' : '160px');
-      const rec = { b, m, frame, host, full: !!full, asks: 0, busy: 0, sends: 0, id: 'f' + uid() };
-      b.frameId = rec.id;
-      frame.srcdoc = this.srcdoc(assets, b);
+      for (const [win, r] of this.frames) if (!r.frame.isConnected) this.frames.delete(win);
+      const rec = { b, m, frame, host, full: !!full, asks: 0, busy: 0, id: 'f' + uid() };
+      frame.srcdoc = this.srcdoc(assets, b, rec.id);
       host.innerHTML = '';
       host.appendChild(frame);
       host.style.minHeight = '';
@@ -1132,7 +1132,7 @@
       rec.win = frame.contentWindow;
     },
     status(rec, html) {
-      const box = rec.full ? rec.host.parentNode.querySelector('.ui-status') : rec.host.parentNode.querySelector('.ui-status');
+      const box = rec.host.parentNode.querySelector('.ui-status');
       if (box) box.innerHTML = html || '';
     },
     reply(rec, payload) { try { rec.win.postMessage(payload, '*'); } catch (e) { /* frame gone */ } },
@@ -1147,8 +1147,15 @@
       const obj = this.store[key] || (this.store[key] = {});
       if (k === null) this.store[key] = {};
       else if (v === null) delete obj[k];
-      else obj[k] = v;
-      if (JSON.stringify(this.store[key]).length > 300000) { toast('这个界面保存的数据太多了，部分内容不会被保存'); return; }
+      else {
+        const before = obj[k];
+        obj[k] = v;
+        if (JSON.stringify(obj).length > 300000) {
+          if (before === undefined) delete obj[k]; else obj[k] = before;
+          toast('这个界面要保存的数据太多了，这部分没有保存');
+          return;
+        }
+      }
       clearTimeout(this.saveTimer);
       this.saveTimer = setTimeout(() => store('glm.uistore', this.store), 400);
     },
@@ -1182,8 +1189,15 @@
         case 'error': this.error(rec, String(m.message || '')); break;
       }
     },
-    send(rec, text) {
-      if (!text) return;
+    async send(rec, text) {
+      if (!text || rec.confirming) return;
+      // A tap inside the interface sends at once; anything else (a timer, a script) needs the user's OK.
+      if (!(navigator.userActivation && navigator.userActivation.isActive)) {
+        rec.confirming = true;
+        const ok = await dialog({ title: '界面想把这段内容发给 GLM', message: text.slice(0, 400) + (text.length > 400 ? '…' : ''), ok: '发送' });
+        rec.confirming = false;
+        if (!ok) return;
+      }
       const now = Date.now();
       if (rec.lastSend && now - rec.lastSend < 1500) return;
       rec.lastSend = now;
@@ -1250,9 +1264,10 @@
       const close = layer(page, () => { if (rec) this.frames.delete(rec.win); refreshFramesOf(m); });
       page.querySelector('[data-close]').addEventListener('click', close);
       page.querySelector('[data-reload]').addEventListener('click', () => { if (rec) this.frames.delete(rec.win); start(); });
+      page.querySelector('.ui-status').addEventListener('click', (e) => { if (e.target.closest('[data-act="ui-fix"]') && rec) { close(); this.fix(rec); } });
       start();
     },
-    async menu(b, m, rec) {
+    async menu(b, m) {
       const k = await sheet({
         title: b.title,
         items: [
@@ -1559,7 +1574,7 @@
   ];
 
   function renderWelcome() {
-    const node = el('<div class="welcome"><span class="spark">' + I.spark + '</span><h1>' + esc(greeting()) + '</h1>' +
+    const node = el('<div class="welcome' + (apiKey() ? '' : ' compact') + '"><span class="spark">' + I.spark + '</span><h1>' + esc(greeting()) + '</h1>' +
       '<p>' + esc(model()) + ' · 思考强度' + EFFORT[S.effort] + (S.toolCode ? ' · 代码计算' : '') + (S.toolSearch ? ' · 联网搜索' : '') + '</p>' +
       '<div class="suggest">' + SUGGEST.map((s, i) => '<button class="sug" data-act="sug" data-i="' + i + '">' + s.icon + esc(s.label) + '</button>').join('') + '</div></div>');
     if (!apiKey()) {
@@ -2037,6 +2052,7 @@
   let stick = true;
   function scrollToBottom(force) {
     if (force) stick = true;
+    if (!state.cur || !state.cur.messages.length) { D.scroller.scrollTop = 0; return; }
     if (stick) D.scroller.scrollTop = D.scroller.scrollHeight;
   }
   D.scroller.addEventListener('scroll', () => {
@@ -2408,7 +2424,7 @@
         const b1 = m1 && blockEl && cur(m1).blocks.find((x) => x.type === 'ui' && x.id === blockEl.dataset.uiBlock);
         if (!b1) return;
         if (act === 'ui-full') UI.openFull(b1, m1);
-        else if (act === 'ui-more') UI.menu(b1, m1, UI.recOf(t));
+        else if (act === 'ui-more') UI.menu(b1, m1);
         else { const rec = UI.recOf(t); if (rec) UI.fix(rec); }
         return;
       }

@@ -3,9 +3,9 @@
  * app.js starts this file from a blob: URL, so the worker inherits the page's Content-Security-Policy.
  * Before any code runs, storage and network APIs are taken out of the worker: the code cannot read the
  * chats, the settings or the API key, and cannot send anything anywhere. The only network access left
- * is the loader below. It fetches the pinned Pyodide files from a list of mirrors — npmmirror and PyPI
- * are reachable from mainland China — checks every file against a known hash, and keeps it in
- * CacheStorage, so Python also works offline after the first download.
+ * is the loader below. It fetches the pinned Pyodide files from the app's own site (www/pyodide/), falling
+ * back to mirrors reachable from mainland China (npmmirror, PyPI) and jsdelivr, checks every file against a
+ * known hash, and keeps it in CacheStorage, so Python also works offline after the first download.
  */
 'use strict';
 (() => {
