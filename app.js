@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.1.1';
+  const VERSION = '1.1.2';
   const CFG = Object.assign({ apiKey: '', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-5.3-flash' }, window.GLM_CONFIG || {});
   const MAX_STEPS = 16; // model calls per answer (each tool round is one)
   const PRICE = { in: 0.8, out: 2.8, cached: 0.23 }; // 元 / 百万 tokens, GLM-5.3-Flash list price
@@ -149,9 +149,9 @@
     add(text) {
       const list = this.list();
       const n = list.reduce((a, m) => Math.max(a, Number(String(m.id).slice(1)) || 0), 0) + 1;
-      const item = { id: 'm' + n, text: String(text).trim().slice(0, 500), at: Date.now() };
+      const item = { id: 'm' + n, text: String(text).trim().slice(0, 300), at: Date.now() };
       list.push(item);
-      this.save(list.slice(-200));
+      this.save(list.slice(-100));
       return item;
     },
     remove(id) {
@@ -218,7 +218,7 @@
   };
 
   // Strip view-only fields before saving.
-  const plainConv = (c) => JSON.parse(JSON.stringify(c, (k, v) => (k === 'live' || k === 't0' ? undefined : v)));
+  const plainConv = (c) => JSON.parse(JSON.stringify(c, (k, v) => (k === 'live' || k === 't0' || k === 'args' ? undefined : v)));
   async function saveConv(c) {
     if (c.deleted) return;
     try { await DB.put('convs', plainConv(c)); } catch (e) { toast('保存失败：存储空间可能已满'); }
@@ -257,12 +257,15 @@
   async function copyText(text) {
     try {
       await navigator.clipboard.writeText(text);
+      return true;
     } catch (e) {
       const ta = document.createElement('textarea');
       ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
       document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
-      try { document.execCommand('copy'); } catch (e2) { /* ignore */ }
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e2) { /* ignore */ }
       ta.remove();
+      return ok;
     }
   }
 
@@ -488,7 +491,7 @@
       '可用库：sympy、mpmath、numpy、scipy、pandas、statsmodels、scikit-learn、networkx、matplotlib、pillow、opencv、highspy（线性/整数规划）、gmpy2、python-flint 和标准库；openpyxl、xlsxwriter（Excel）与 python-docx（Word）会在代码用到时自动安装。' +
       '同一对话里的多次运行共享变量和已导入的模块（类似 Jupyter），如果结果里提示环境已重启，需要重新定义变量。' +
       '用户上传的文件在 files/ 目录（例如 pd.read_excel("files/成绩.xlsx")）。要交给用户的文件保存到 outputs/ 目录（例如 df.to_excel("outputs/结果.xlsx")、doc.save("outputs/报告.docx")），运行后会出现下载按钮。' +
-      'matplotlib 画的图会直接显示给用户，图里可以直接写中文（已配置好，不要改字体设置）。' +
+      'matplotlib 画的图会直接显示给用户，图里可以直接写中文（已配置好，不要改字体设置）；但保存成图片文件（PNG/PDF）或嵌进 Excel/Word 的图表里中文显示不出来，这种情况下图中文字用英文。' +
       '用 print() 输出结果；最后一行如果是表达式会返回它的 repr。不能联网。单次运行超过 60 秒会被终止。',
       { code: { type: 'string', description: '要运行的 Python 代码' } }, ['code']),
     run_javascript: fn('run_javascript',
@@ -518,7 +521,7 @@
       '写法：只写界面片段（HTML + <style> + <script>），不要写 <html>/<head>/<body>。宽度约 340～720px，手机优先，触控友好（按钮高 ≥40px，字号 ≥15px），简洁美观、留白充足。\n' +
       '内置设计系统，自动适配浅色/深色，请优先使用：CSS 变量 --bg --surface --surface-2 --text --text-2 --text-3 --border --accent --accent-soft --blue --green --red --yellow --purple --ok --danger --radius；样式类 .card .btn .btn.primary .btn.ghost .btn.sm .input .select .chip .chip.on .badge .row .col .grid .muted .table .tabs .progress .stat .option(.selected/.correct/.wrong) .fade-in。界面背景保持透明。\n' +
       '接口：glm.send(文本) 把用户在界面里的选择或结果作为用户消息发回对话（例如测验交卷后发送「我的答案：…，得分：…」，你再继续讲解），用在明确的提交按钮上；await glm.ask(提示词, {system, json:true}) 在界面里调用 AI 并返回文字（需要动态生成内容时用，例如出新题、批改、对话角色）；await glm.chat(消息数组)；localStorage 可用，会保存在手机上；glm.copy(文本)、glm.download(文件名, 内容)、glm.openLink(网址)；glm.color("--accent") 取主题色给图表用；glm.onTheme(fn) 监听深浅色切换。\n' +
-      '不能联网（fetch 不可用），数据写在代码里或用 glm.ask 生成。可以加载这些库（国内可访问）：Chart.js https://registry.npmmirror.com/chart.js/4.4.4/files/dist/chart.umd.js ，ECharts https://registry.npmmirror.com/echarts/5.5.1/files/dist/echarts.min.js ，D3 https://registry.npmmirror.com/d3/7.9.0/files/dist/d3.min.js ，Three.js（ES module）https://registry.npmmirror.com/three/0.169.0/files/build/three.module.min.js ，Mermaid https://registry.npmmirror.com/mermaid/11.4.0/files/dist/mermaid.min.js ，KaTeX https://registry.npmmirror.com/katex/0.16.11/files/dist/katex.min.js （样式 katex.min.css 同目录），Matter.js https://registry.npmmirror.com/matter-js/0.20.0/files/build/matter.min.js ，canvas-confetti https://registry.npmmirror.com/canvas-confetti/1.9.3/files/dist/confetti.browser.js 。\n' +
+      '不能联网（fetch 不可用），数据写在代码里或用 glm.ask 生成；alert/confirm/prompt 不可用，提示信息直接显示在界面里。可以加载这些库（国内可访问）：Chart.js https://registry.npmmirror.com/chart.js/4.4.4/files/dist/chart.umd.js ，ECharts https://registry.npmmirror.com/echarts/5.5.1/files/dist/echarts.min.js ，D3 https://registry.npmmirror.com/d3/7.9.0/files/dist/d3.min.js ，Three.js（ES module）https://registry.npmmirror.com/three/0.169.0/files/build/three.module.min.js ，Mermaid https://registry.npmmirror.com/mermaid/11.4.0/files/dist/mermaid.min.js ，KaTeX https://registry.npmmirror.com/katex/0.16.11/files/dist/katex.min.js （样式 katex.min.css 同目录），Matter.js https://registry.npmmirror.com/matter-js/0.20.0/files/build/matter.min.js ，canvas-confetti https://registry.npmmirror.com/canvas-confetti/1.9.3/files/dist/confetti.browser.js 。\n' +
       '数学公式直接写 LaTeX（行内 $…$，独立 $$…$$），界面会自动渲染，包括之后用 JS 插入的内容；不要用 $ 表示货币。修改界面时，用修改后的完整代码再调用一次 show_ui（title 保持一致，保存的数据会延续）。',
       {
         title: { type: 'string', description: '界面标题，简短，例如「二次函数探索器」' },
@@ -559,7 +562,7 @@
     if (tools.length) s += '\n\n你还可以使用这些工具（只在确实需要时使用，普通聊天和问答直接回答即可）：\n- ' + tools.join('\n- ');
     if (S.toolMemory) {
       const mem = Memory.list();
-      s += '\n\n关于用户的长期记忆（编号可用于 update_memory 删除）：\n' + (mem.length ? mem.map((m) => '[' + m.id + '] ' + m.text).join('\n') : '（暂无）');
+      s += '\n\n关于用户的长期记忆（编号可用于 update_memory 删除）：\n' + (mem.length ? clip(mem.map((m) => '[' + m.id + '] ' + m.text).join('\n'), 8000) : '（暂无）');
     }
     if (S.systemPrompt.trim()) s += '\n\n用户的个人偏好与要求：\n' + S.systemPrompt.trim();
     return s;
@@ -770,9 +773,28 @@
     return out;
   }
 
+  /** A web address the conversation itself brought up: typed by the user, found by search, or linked from a page already read. */
+  function knownUrl(conv, url, read) {
+    const bare = url.replace(/[#?].*$/, '').replace(/\/$/, '');
+    const seen = (text) => text && (text.includes(url) || text.includes(bare));
+    for (const m of conv.messages) {
+      if (m.role === 'user' && seen(m.text)) return true;
+      if (m.role === 'assistant') for (const x of m.vs) for (const b of x.blocks) {
+        if (b.type === 'search' && b.results.some((r) => r.link === url || seen(r.link))) return true;
+      }
+    }
+    return read.some(seen);
+  }
+
   async function runTool(call, v, job) {
     let args;
-    try { args = JSON.parse(call.function.arguments || '{}'); } catch (e) { return '工具参数不是合法的 JSON：' + call.function.arguments; }
+    try {
+      args = JSON.parse(call.function.arguments || '{}');
+    } catch (e) {
+      const ub = job.uiBlocks.get(call.id);
+      if (ub) { ub.status = 'error'; ub.error = '界面代码不完整（输出可能被截断了）'; paintSoon(); }
+      return '工具参数不是合法的 JSON（可能输出被截断了），请重新调用：' + String(call.function.arguments).slice(0, 200);
+    }
     const name = call.function.name;
     const signal = job.ctrl.signal;
     const fail = (b, e) => {
@@ -802,9 +824,15 @@
       v.blocks.push(b);
       paintSoon();
       if (!/^https?:\/\/\S+$/i.test(url)) { b.status = 'error'; b.error = '网址无效'; return '网址无效：' + url; }
+      if (!knownUrl(job.conv, url, job.read) && !(await dialog({ title: 'GLM 想读取这个网页', message: url.slice(0, 600), ok: '允许' }))) {
+        b.status = 'error';
+        b.error = '用户没有允许';
+        return '用户没有允许读取这个网址。';
+      }
       try {
         const r = await readWebpage(url, signal);
         const text = String(r.content || '').trim();
+        job.read.push(text);
         b.title = String(r.title || '').trim() || (text.match(/^(.{1,80})\n=+/) || [0, ''])[1];
         b.chars = text.length;
         b.status = 'done';
@@ -855,6 +883,7 @@
     if (name === 'show_ui') {
       let b = job.uiBlocks.get(call.id);
       if (!b) { b = { type: 'ui', id: 'ui_' + uid(), title: '', html: '', status: 'streaming', chars: 0 }; v.blocks.push(b); }
+      delete b.args;
       b.title = String(args.title || b.title || '界面').slice(0, 60);
       b.html = String(args.html || '');
       b.chars = b.html.length;
@@ -873,7 +902,12 @@
       const hadPython = lang === 'python' && job.conv.messages.some((m) => m.role === 'assistant' && m.vs.some((x) => x.blocks.some((y) => y !== b && y.type === 'code' && y.lang === 'python' && y.status !== 'running')));
       try {
         const files = lang === 'python' ? await filesForPython(job.conv) : [];
-        const r = await Sandbox.run(lang, b.code, { ns: job.conv.id, files, signal, onProgress: (t) => { b.note = t; paintSoon(); } });
+        let r;
+        try {
+          r = await Sandbox.run(lang, b.code, { ns: job.conv.id, files, signal, onProgress: (t) => { b.note = t; paintSoon(); } });
+        } finally {
+          if (!r || r.setup) for (const f of files) Sandbox.sent.delete(job.conv.id + ':' + f.id);
+        }
         Object.assign(b, { status: r.error ? 'error' : 'done', stdout: r.stdout || '', result: r.result == null ? null : r.result, error: r.error || '', ms: r.ms || 0, note: '' });
         if (r.setup) b.setup = true;
         b.images = [];
@@ -895,7 +929,7 @@
 
   /** One answer: stream the model, run the tools it asks for, repeat until it answers in text. */
   async function runTurn(conv, msg, v) {
-    const job = { conv, msg, v, ctrl: new AbortController(), cite: 0, searches: 0, uiBlocks: new Map() };
+    const job = { conv, msg, v, ctrl: new AbortController(), cite: 0, searches: 0, uiBlocks: new Map(), read: [] };
     state.job = job;
     updateComposer();
     renderSidebar();
@@ -940,7 +974,7 @@
               if (c.name === 'show_ui') {
                 if (!c.block) { c.block = { type: 'ui', id: 'ui_' + uid(), title: '', html: '', status: 'streaming', chars: 0 }; v.blocks.push(c.block); }
                 c.block.chars = c.args.length;
-                c.block.preview = partialField(c.args, 'html').slice(-1200);
+                c.block.args = c.args;
                 if (!c.block.title) { const tm = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(c.args); if (tm) { try { c.block.title = JSON.parse('"' + tm[1] + '"'); } catch (e) { /* partial */ } } }
               }
             }
@@ -983,7 +1017,7 @@
       }
       for (const b of v.blocks) {
         if (b.live) { b.live = false; b.ms = Date.now() - (b.t0 || Date.now()); }
-        if (b.status === 'running') { b.status = 'error'; b.error = b.error || '已中断'; b.note = ''; }
+        if (b.status === 'running' || b.status === 'streaming') { b.status = 'error'; b.error = b.error || '已中断'; b.note = ''; }
       }
     } finally {
       v.ms = Date.now() - t0;
@@ -1060,16 +1094,15 @@
     if (!MD.pendingMath || window.katex) return;
     ensureKatex().then(() => {
       MD.pendingMath = false;
-      const top = D.scroller.scrollTop;
-      renderThread();
-      D.scroller.scrollTop = top;
+      if (state.cur) for (const m of state.cur.messages) if (m.role === 'assistant') paintAI(m);
     }, () => {});
   }
 
   // ───────────────────────── generative UI (sandboxed interfaces) ─────────────────────────
   const UI = {
     assets: null,
-    frames: new Map(), // iframe contentWindow -> record
+    frames: new Map(), // frame id -> record (the id travels in every message from that frame)
+    asks: new Map(), // conversation id -> AI calls made by its interfaces this session
     store: load('glm.uistore', {}),
     saveTimer: 0,
     observer: null,
@@ -1115,31 +1148,68 @@
       const { b, m } = host._ui;
       let assets;
       try { assets = await this.load(); } catch (e) { host.innerHTML = '<div class="ui-fail">' + esc(e.message) + '</div>'; return; }
+      if (!host.isConnected) return;
+      for (const [id, r] of this.frames) if (!r.frame.isConnected) this.frames.delete(id);
+      if (!full) this.trim(host);
       const frame = document.createElement('iframe');
       frame.className = 'ui-frame';
-      frame.setAttribute('sandbox', 'allow-scripts allow-modals');
+      frame.setAttribute('sandbox', 'allow-scripts allow-forms');
+      frame.setAttribute('allow', 'clipboard-write');
       frame.setAttribute('title', b.title || '界面');
-      frame.setAttribute('loading', 'eager');
       frame.style.height = (full ? '100%' : '160px');
-      for (const [win, r] of this.frames) if (!r.frame.isConnected) this.frames.delete(win);
-      const rec = { b, m, frame, host, full: !!full, asks: 0, busy: 0, id: 'f' + uid() };
+      const rec = { b, m, frame, host, full: !!full, busy: 0, loads: 0, alive: false, id: 'f' + uid() };
       frame.srcdoc = this.srcdoc(assets, b, rec.id);
+      // The srcdoc loads once; any later load means the interface navigated itself somewhere: stop it.
+      frame.addEventListener('load', () => {
+        if (++rec.loads < 2) return;
+        this.frames.delete(rec.id);
+        host.innerHTML = '<div class="ui-fail">这个界面试图打开外部网页，已被阻止。</div>';
+      });
       host.innerHTML = '';
       host.appendChild(frame);
       host.style.minHeight = '';
-      // contentWindow exists once the frame is in the document
-      this.frames.set(frame.contentWindow, rec);
-      rec.win = frame.contentWindow;
+      this.frames.set(rec.id, rec);
+      setTimeout(() => {
+        if (!rec.alive && frame.isConnected && document.visibilityState === 'visible' && this.frames.get(rec.id) === rec) {
+          this.status(rec, '<span class="ui-err">' + I.alert + '<span>界面没有加载出来</span></span><button class="btn small" data-act="ui-reload">重新加载</button>');
+        }
+      }, 8000);
+    },
+    /** Stop the interfaces inside `root` (they restart when shown again; saved data stays). */
+    unmountIn(root, blockId) {
+      if (!root || !root.querySelectorAll) return;
+      root.querySelectorAll('.ui-host[data-mounted]').forEach((host) => {
+        if (blockId && host.dataset.ui !== blockId) return;
+        const frame = host.querySelector('iframe');
+        if (frame) for (const [id, r] of this.frames) if (r.frame === frame) this.frames.delete(id);
+        if (this.observer) this.observer.unobserve(host);
+        host.removeAttribute('data-mounted');
+        host.innerHTML = '';
+      });
+    },
+    /** Keep at most a few interfaces running: stop the ones farthest from the screen. */
+    trim(keep) {
+      const live = [...this.frames.values()].filter((r) => !r.full && r.frame.isConnected && r.host !== keep);
+      if (live.length < 5) return;
+      const view = D.scroller.getBoundingClientRect();
+      const dist = (r) => { const q = r.host.getBoundingClientRect(); return q.bottom < view.top ? view.top - q.bottom : q.top > view.bottom ? q.top - view.bottom : 0; };
+      live.sort((x, y) => dist(y) - dist(x));
+      for (const r of live.slice(0, live.length - 4)) {
+        if (dist(r) < 1500) continue;
+        const node = r.host.closest('.msg-ai');
+        this.unmountIn(r.host.parentNode, r.b.id);
+        if (node) { const msg = findMsg(node.dataset.id); if (msg) this.scan(node, msg); }
+      }
     },
     status(rec, html) {
       const box = rec.host.parentNode.querySelector('.ui-status');
       if (box) box.innerHTML = html || '';
     },
-    reply(rec, payload) { try { rec.win.postMessage(payload, '*'); } catch (e) { /* frame gone */ } },
+    reply(rec, payload) { try { rec.frame.contentWindow.postMessage(payload, '*'); } catch (e) { /* frame gone */ } },
     broadcastTheme() {
       const theme = this.theme();
-      for (const rec of this.frames.values()) {
-        if (!rec.frame.isConnected) { this.frames.delete(rec.win); continue; }
+      for (const [id, rec] of this.frames) {
+        if (!rec.frame.isConnected) { this.frames.delete(id); continue; }
         this.reply(rec, { type: 'theme', theme });
       }
     },
@@ -1150,7 +1220,7 @@
       else {
         const before = obj[k];
         obj[k] = v;
-        if (JSON.stringify(obj).length > 300000) {
+        if (JSON.stringify(obj).length > 300000 || JSON.stringify(this.store).length > 1500000) {
           if (before === undefined) delete obj[k]; else obj[k] = before;
           toast('这个界面要保存的数据太多了，这部分没有保存');
           return;
@@ -1164,12 +1234,13 @@
       store('glm.uistore', this.store);
     },
     async onMessage(e) {
-      const rec = this.frames.get(e.source);
-      if (!rec) return;
-      const m = e.data || {};
-      if (!m || m.__glm !== rec.id) return;
+      const m = e.data;
+      if (!m || typeof m.__glm !== 'string') return;
+      const rec = this.frames.get(m.__glm);
+      if (!rec || e.source !== rec.frame.contentWindow) return;
       switch (m.type) {
         case 'size': {
+          rec.alive = true;
           if (rec.full) break;
           const h = Math.max(48, Math.min(Number(m.h) || 0, 2400));
           rec.frame.style.height = h + 'px';
@@ -1177,11 +1248,20 @@
         }
         case 'store': this.persist(rec.b.store, String(m.key), m.value == null ? null : String(m.value)); break;
         case 'store-clear': this.persist(rec.b.store, null); break;
-        case 'copy': copyText(String(m.text || '')).then(() => toast('已复制')); break;
-        case 'download': offerFile(String(m.name || 'file.txt').replace(/[\\/:*?"<>|]/g, '_'), String(m.content || ''), m.mime || mimeOf(m.name || '')); break;
+        case 'copied': toast('已复制'); break;
+        case 'copy': toast((await copyText(String(m.text || ''))) ? '已复制' : '复制失败，请长按文字手动复制'); break;
+        case 'download': {
+          const name = String(m.name || 'file.txt').replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
+          const mime = String(m.mime || '') || mimeOf(name);
+          let content = String(m.data || '');
+          if (m.encoding === 'base64') { try { content = dataUrlBytes('data:,' + content); } catch (err) { toast('文件内容无效'); break; } }
+          offerFile(name, content, mime);
+          break;
+        }
         case 'open': {
           const url = String(m.url || '');
-          if (/^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener,noreferrer');
+          if (!/^https?:\/\//i.test(url)) break;
+          if (await dialog({ title: '界面想打开这个网页', message: url.slice(0, 600), ok: '打开' })) window.open(url, '_blank', 'noopener,noreferrer');
           break;
         }
         case 'send': this.send(rec, String(m.text || '').trim()); break;
@@ -1209,29 +1289,36 @@
     async ask(rec, m) {
       const done = (payload) => this.reply(rec, Object.assign({ type: 'reply', rid: m.rid }, payload));
       if (!apiKey()) return done({ error: '还没有设置 API Key' });
-      if (rec.asks >= 80) return done({ error: '这个界面调用 AI 的次数太多了，请重新打开' });
+      const conv = findConvOf(rec.m);
+      const key = conv ? conv.id : '';
+      const used = this.asks.get(key) || 0;
+      if (used >= 150) return done({ error: '这个对话里的界面调用 AI 的次数已达上限' });
       if (rec.busy >= 2) return done({ error: '上一次 AI 调用还没完成' });
-      rec.asks++;
+      this.asks.set(key, used + 1);
       rec.busy++;
       this.status(rec, '<span class="spinner"></span><span>界面正在调用 GLM…</span>');
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 120000);
       try {
         const o = m.opts || {};
-        const msgs = [{ role: 'system', content: o.system ? String(o.system).slice(0, 8000) : '你是嵌在一个小应用里的 AI。按要求直接给出结果，不要寒暄，不要解释你是谁。' }];
+        const msgs = [{ role: 'system', content: o.system ? String(o.system).slice(0, 6000) : '你是嵌在一个小应用里的 AI。按要求直接给出结果，不要寒暄，不要解释你是谁。' }];
         const list = Array.isArray(m.messages) ? m.messages : [];
-        for (const x of list.slice(-40)) if (x && (x.role === 'user' || x.role === 'assistant')) msgs.push({ role: x.role, content: String(x.content || '').slice(0, 20000) });
-        if (m.prompt) msgs.push({ role: 'user', content: String(m.prompt).slice(0, 20000) });
+        for (const x of list.slice(-30)) if (x && (x.role === 'user' || x.role === 'assistant')) msgs.push({ role: x.role, content: String(x.content || '').slice(0, 8000) });
+        if (m.prompt) msgs.push({ role: 'user', content: String(m.prompt).slice(0, 12000) });
         if (msgs.length < 2) throw new Error('没有提问内容');
-        const body = { model: model(), stream: false, reasoning_effort: ['low', 'high', 'max'].includes(o.effort) ? o.effort : 'low', messages: msgs };
+        if (msgs.reduce((n, x) => n + x.content.length, 0) > 60000) throw new Error('发给 AI 的内容太长了');
+        const body = { model: model(), stream: false, reasoning_effort: o.effort === 'high' ? 'high' : 'low', max_tokens: 8192, messages: msgs };
         if (o.json) body.response_format = { type: 'json_object' };
-        const res = await chatOnce(body);
+        const res = await chatOnce(body, ctrl.signal);
         const d = await res.json();
         if (d.usage) track({ in: d.usage.prompt_tokens, out: d.usage.completion_tokens, cached: (d.usage.prompt_tokens_details && d.usage.prompt_tokens_details.cached_tokens) || 0 }, 0);
         let text = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '';
         if (o.json) text = text.replace(/^```(?:json)?\s*|\s*```$/g, '');
         done({ text });
       } catch (err) {
-        done({ error: err.message || String(err) });
+        done({ error: err && err.name === 'AbortError' ? 'AI 响应超时' : err.message || String(err) });
       } finally {
+        clearTimeout(timer);
         rec.busy--;
         if (!rec.busy) this.status(rec, '');
       }
@@ -1242,12 +1329,13 @@
     },
     fix(rec) {
       if (state.job) { toast('请等当前回答完成'); return; }
-      send({ text: '〔界面〕「' + rec.b.title + '」运行时出错：' + (rec.lastError || '未知错误') + '。请找出原因，用修好的完整代码重新生成这个界面。', via: 'ui' });
+      send({ text: '〔界面〕「' + rec.b.title + '」运行时出错：' + String(rec.lastError || '未知错误').slice(0, 300) + '。请找出原因，用修好的完整代码重新生成这个界面。', via: 'ui' });
     },
     recOf(el) {
       const host = el.closest('.ui-block') && el.closest('.ui-block').querySelector('.ui-host');
       const frame = host && host.querySelector('iframe');
-      return frame ? this.frames.get(frame.contentWindow) : null;
+      if (frame) for (const r of this.frames.values()) if (r.frame === frame) return r;
+      return null;
     },
     openFull(b, m) {
       const page = el('<div class="page ui-page" role="dialog" aria-label="' + esc(b.title) + '"><div class="page-head"><button class="icon-btn" data-close aria-label="返回">' + I.back + '</button><h2>' + esc(b.title) +
@@ -1258,12 +1346,13 @@
       const start = async () => {
         await this.mount(host, true);
         const frame = host.querySelector('iframe');
-        rec = frame && this.frames.get(frame.contentWindow);
+        rec = null;
+        if (frame) for (const r of this.frames.values()) if (r.frame === frame) rec = r;
         if (rec) rec.close = close;
       };
-      const close = layer(page, () => { if (rec) this.frames.delete(rec.win); refreshFramesOf(m); });
+      const close = layer(page, () => { if (rec) this.frames.delete(rec.id); refreshFramesOf(m, b.id); });
       page.querySelector('[data-close]').addEventListener('click', close);
-      page.querySelector('[data-reload]').addEventListener('click', () => { if (rec) this.frames.delete(rec.win); start(); });
+      page.querySelector('[data-reload]').addEventListener('click', () => { if (rec) this.frames.delete(rec.id); start(); });
       page.querySelector('.ui-status').addEventListener('click', (e) => { if (e.target.closest('[data-act="ui-fix"]') && rec) { close(); this.fix(rec); } });
       start();
     },
@@ -1309,13 +1398,7 @@
   function refreshFramesOf(m, blockId) {
     const node = D.thread.querySelector('.msg-ai[data-id="' + m.id + '"]');
     if (!node) return;
-    node.querySelectorAll('.ui-host[data-mounted]').forEach((host) => {
-      if (blockId && host.dataset.ui !== blockId) return;
-      const frame = host.querySelector('iframe');
-      if (frame) UI.frames.delete(frame.contentWindow);
-      host.removeAttribute('data-mounted');
-      host.innerHTML = '';
-    });
+    UI.unmountIn(node, blockId);
     UI.scan(node, m);
   }
 
@@ -1417,7 +1500,7 @@
     }
     if (b.type === 'ui') {
       if (b.status === 'streaming') {
-        const lines = (b.preview || '').split('\n').slice(-9).join('\n');
+        const lines = partialField(b.args || '', 'html').slice(-1200).split('\n').slice(-9).join('\n');
         return el('<div class="tool ui-gen"><div class="tool-head"><span class="tool-ic">' + I.layout + '</span><span class="tool-title">正在生成界面' + (b.title ? '：' + esc(b.title) : '…') +
           '<span class="tool-sub">已写 ' + fmtNum(b.chars) + ' 字符</span></span><span class="tool-state"><span class="spinner"></span></span></div>' +
           (lines ? '<div class="ui-preview"><pre><code>' + MD.highlight(lines, 'html') + '</code></pre></div>' : '') + '</div>');
@@ -1486,7 +1569,10 @@
       if (want !== rec.el) wrap.insertBefore(rec.el, want);
       prev = rec.el;
     });
-    while (prev ? prev.nextSibling : wrap.firstChild) (prev ? prev.nextSibling : wrap.firstChild).remove();
+    for (let gone = prev ? prev.nextSibling : wrap.firstChild; gone; gone = prev ? prev.nextSibling : wrap.firstChild) {
+      UI.unmountIn(gone);
+      gone.remove();
+    }
     const tail = node.querySelector('.ai-tail');
     const html = tailHtml(m, v, live);
     if (tail._html !== html) { tail.innerHTML = html; tail._html = html; }
@@ -1616,6 +1702,7 @@
 
   function renderThread() {
     const c = state.cur;
+    UI.unmountIn(D.thread);
     D.thread.innerHTML = '';
     if (!c || !c.messages.length) D.thread.appendChild(renderWelcome());
     else {
@@ -1628,7 +1715,9 @@
 
   function rerenderMsg(m) {
     const old = D.thread.querySelector('.msg[data-id="' + m.id + '"]');
-    if (old) old.replaceWith(renderMsg(m));
+    if (!old) return;
+    UI.unmountIn(old);
+    old.replaceWith(renderMsg(m));
   }
 
   // ───────────────────────── sidebar ─────────────────────────
@@ -1985,7 +2074,12 @@
       saveDraft();
       renderAtts();
     }
-    renderThread();
+    if (D.thread.querySelector('.msg')) {
+      D.thread.append(renderMsg(um), renderMsg(am));
+      const before = c.messages[c.messages.length - 3];
+      if (before && before.role === 'assistant') paintAI(before);
+      updateTitle();
+    } else renderThread();
     renderSidebar();
     store('glm.last', { id: c.id, at: Date.now() });
     scrollToBottom(true);
@@ -2127,7 +2221,7 @@
             .map(([v, l]) => '<option value="' + v + '"' + (S.imageModel === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></div>' +
         '<div class="row"><div class="row-line"><div class="row-label">长期记忆<small>GLM 会记住你的称呼、偏好等长期有用的信息，所有对话都会用到</small></div>' + sw('toolMemory') + '</div>' +
         '<div id="mem-list"></div></div>' +
-        '<div class="row"><div class="row-line"><div class="row-label">生成式界面<small>GLM 可以直接在对话里生成可交互的界面：测验、交互式讲解、图表、计算器、小游戏…界面在隔离沙箱里运行，拿不到你的 Key 和聊天记录</small></div>' + sw('toolUI') + '</div></div>' +
+        '<div class="row"><div class="row-line"><div class="row-label">生成式界面<small>GLM 可以直接在对话里生成可交互的界面：测验、交互式讲解、图表、计算器、小游戏…界面在隔离沙箱里运行，读不到你的 Key、聊天记录和记忆；要打开外部网页时会先问你</small></div>' + sw('toolUI') + '</div></div>' +
         '<div class="row"><div class="row-line"><div class="row-label">查找以前的对话<small>你提到「上次聊过的…」时，GLM 可以翻看以前的对话</small></div>' + sw('toolChats') + '</div></div>' +
       '</div>' +
       '<div class="sec-title">个性化</div><div class="group">' +
@@ -2417,6 +2511,13 @@
         return;
       }
       if (act === 'zoom') { viewImage(t.src); return; }
+      if (act === 'ui-reload') {
+        const msgEl2 = t.closest('.msg');
+        const m2 = msgEl2 && findMsg(msgEl2.dataset.id);
+        const blk = t.closest('.ui-block');
+        if (m2 && blk) refreshFramesOf(m2, blk.dataset.uiBlock);
+        return;
+      }
       if (act === 'ui-full' || act === 'ui-more' || act === 'ui-fix') {
         const msgEl1 = t.closest('.msg');
         const m1 = msgEl1 && findMsg(msgEl1.dataset.id);
@@ -2529,11 +2630,24 @@
     if (!('serviceWorker' in navigator)) return;
     if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') return;
     const hadController = !!navigator.serviceWorker.controller;
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    let reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController) return;
-      toast('新版本已就绪，点这里刷新', 8000, () => { if (!state.job) location.reload(); });
+      if (hadController && !reloading) { reloading = true; location.reload(); }
     });
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      const offer = () => {
+        if (!reg.waiting || !navigator.serviceWorker.controller) return;
+        toast('有新版本，点这里更新', 12000, () => {
+          if (state.job) { toast('请等当前回答完成后再更新'); return; }
+          reg.waiting.postMessage('skip-waiting');
+        });
+      };
+      offer();
+      reg.addEventListener('updatefound', () => {
+        const w = reg.installing;
+        if (w) w.addEventListener('statechange', () => { if (w.state === 'installed') offer(); });
+      });
+    }).catch(() => {});
   }
 
   // ───────────────────────── start ─────────────────────────
@@ -2549,7 +2663,18 @@
       state.convs = [];
     }
     // answers that were interrupted when the app was closed
-    for (const c of state.convs) for (const m of c.messages) if (m.role === 'assistant') for (const v of m.vs) if (v.status === 'streaming') v.status = 'stopped';
+    for (const c of state.convs) {
+      for (const m of c.messages) {
+        if (m.role !== 'assistant') continue;
+        for (const v of m.vs) {
+          if (v.status === 'streaming') v.status = 'stopped';
+          for (const b of v.blocks) {
+            if (b.status === 'running' || b.status === 'streaming') { b.status = 'error'; b.error = '已中断'; b.note = ''; }
+            if (b.live) b.live = false;
+          }
+        }
+      }
+    }
     sortConvs();
     const last = load('glm.last', null);
     const recent = last && last.id && Date.now() - last.at < 30 * 60000 ? state.convs.find((c) => c.id === last.id) : null;
@@ -2561,6 +2686,7 @@
     updateComposer();
     requestAnimationFrame(() => scrollToBottom(true));
     if (wide()) D.app.classList.remove('side-open');
+    UI.load().catch(() => {});
     registerSW();
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   }

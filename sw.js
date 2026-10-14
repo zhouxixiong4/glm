@@ -1,6 +1,6 @@
 /* sw.js — offline support. The app shell is cached at install time (bump VERSION on every release);
  * KaTeX files and generated images are cached the first time they are shown. API calls are never cached. */
-const VERSION = 'glm-v1.1.1';
+const VERSION = 'glm-v1.1.2';
 const RUNTIME = 'glm-runtime-1';
 const SHELL = [
   './', './index.html', './style.css', './boot.js', './config.js', './markdown.js', './app.js', './sandbox.js', './ui-runtime.js', './ui-base.css',
@@ -12,9 +12,13 @@ const CDN = /^https:\/\/(registry\.npmmirror\.com\/katex\/0\.16\.11\/|cdn\.jsdel
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(VERSION)
-      .then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
-      .then(() => self.skipWaiting()),
+      .then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))),
   );
+});
+
+// A new version waits until the page asks for it (the user tapped 更新), so a running page never mixes versions.
+self.addEventListener('message', (event) => {
+  if (event.data === 'skip-waiting') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -47,7 +51,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   // Images drawn by CogView: their links expire after a few days, so keep a copy on the phone.
-  if (req.destination === 'image' && /(^|\.)(ufileos\.com|bigmodel\.cn|aliyuncs\.com)$/.test(url.hostname)) {
+  if (req.destination === 'image' && /(^|\.)(ufileos\.com|bigmodel\.cn|chatglm\.cn|aliyuncs\.com)$/.test(url.hostname)) {
     event.respondWith((async () => {
       const cache = await caches.open(RUNTIME);
       const hit = await cache.match(req, { ignoreVary: true });

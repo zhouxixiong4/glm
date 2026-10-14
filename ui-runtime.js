@@ -2,7 +2,7 @@
  * It is inlined into the iframe's srcdoc and allowed by its hash in the app's Content-Security-Policy;
  * tools/csp_hash.py writes that hash into index.html, so run it after changing this file.
  * It mounts the model's HTML, runs its scripts (as blob: scripts, since inline ones are not allowed),
- * and gives the interface a small API (window.glm) that talks to the app through postMessage. */
+ * renders LaTeX, and gives the interface a small API (window.glm) that talks to the app through postMessage. */
 (function () {
   'use strict';
   var data = JSON.parse(document.getElementById('glm-data').textContent);
@@ -22,6 +22,11 @@
     });
   }
 
+  // No peer-to-peer connections: they could reach outside without passing the app.
+  ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel'].forEach(function (name) {
+    try { Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false }); } catch (e) { /* ignore */ }
+  });
+
   // localStorage works and is kept on the phone (the real one is unavailable in a sandboxed frame).
   function makeStorage(initial, persist) {
     var map = {};
@@ -40,6 +45,12 @@
   try { Object.defineProperty(window, 'localStorage', { value: local, configurable: true }); } catch (e) { /* ignore */ }
   try { Object.defineProperty(window, 'sessionStorage', { value: makeStorage({}, false), configurable: true }); } catch (e) { /* ignore */ }
 
+  function toBase64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+
   var themeListeners = [];
   var glm = {
     /** Send text to the conversation as the user's next message. */
@@ -48,9 +59,26 @@
     ask: function (prompt, opts) { return call('ask', { prompt: String(prompt == null ? '' : prompt), opts: opts || {} }); },
     /** Multi-turn: messages = [{role: 'user'|'assistant', content}]. */
     chat: function (messages, opts) { return call('ask', { messages: messages || [], opts: opts || {} }); },
-    copy: function (text) { post({ type: 'copy', text: String(text == null ? '' : text) }); },
+    copy: function (text) {
+      text = String(text == null ? '' : text);
+      var fallback = function () { post({ type: 'copy', text: text }); };
+      try { navigator.clipboard.writeText(text).then(function () { post({ type: 'copied' }); }, fallback); } catch (e) { fallback(); }
+    },
+    /** Save a file: content may be text, an object (saved as JSON), a Blob, an ArrayBuffer / typed array, or a canvas. */
     download: function (name, content, mime) {
-      post({ type: 'download', name: String(name || 'file.txt'), content: typeof content === 'string' ? content : JSON.stringify(content, null, 2), mime: mime || '' });
+      name = String(name || 'file.txt');
+      var send = function (payload) { payload.type = 'download'; payload.name = name; payload.mime = mime || ''; post(payload); };
+      if (content && typeof content.toDataURL === 'function') { send({ data: content.toDataURL('image/png').split(',')[1], encoding: 'base64', mime: 'image/png' }); return; }
+      if (typeof Blob !== 'undefined' && content instanceof Blob) {
+        content.arrayBuffer().then(function (buf) { send({ data: toBase64(new Uint8Array(buf)), encoding: 'base64', mime: mime || content.type }); });
+        return;
+      }
+      if (content instanceof ArrayBuffer || ArrayBuffer.isView(content)) {
+        var u8 = content instanceof ArrayBuffer ? new Uint8Array(content) : new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
+        send({ data: toBase64(u8), encoding: 'base64' });
+        return;
+      }
+      send({ data: typeof content === 'string' ? content : JSON.stringify(content, null, 2), encoding: 'text' });
     },
     openLink: function (url) { post({ type: 'open', url: String(url || '') }); },
     storage: local,
@@ -76,7 +104,7 @@
   });
 
   var reported = 0;
-  function report(msg) { if (reported++ < 3) post({ type: 'error', message: String(msg || '未知错误').slice(0, 600) }); }
+  function report(msg) { if (reported++ < 3) post({ type: 'error', message: String(msg || '未知错误').slice(0, 300) }); }
   window.addEventListener('error', function (e) {
     if (e.message) report(e.message + (e.lineno ? '（第 ' + e.lineno + ' 行）' : ''));
   });
@@ -85,16 +113,21 @@
     report((r && (r.message || r)) || 'Promise 被拒绝');
   });
 
-  // Links open in the browser, never inside the frame.
+  // Links go through the app (which asks before opening); forms never navigate.
   document.addEventListener('click', function (e) {
     var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!a) return;
     var href = a.getAttribute('href') || '';
-    if (/^https?:\/\//i.test(href)) { e.preventDefault(); glm.openLink(href); }
-    else if (/^javascript:/i.test(href)) e.preventDefault();
+    if (href.charAt(0) === '#') return;
+    e.preventDefault();
+    if (/^https?:\/\//i.test(href)) glm.openLink(href);
   }, true);
+  document.addEventListener('submit', function (e) { e.preventDefault(); }, true);
 
   // Inline handlers (onclick="…") are blocked by the CSP: turn them into listeners, now and later.
+  var HANDLERS = ['onclick', 'ondblclick', 'oninput', 'onchange', 'onsubmit', 'onkeydown', 'onkeyup', 'onkeypress', 'onfocus', 'onblur',
+    'onmousedown', 'onmouseup', 'onmouseover', 'onmouseout', 'onmousemove', 'onpointerdown', 'onpointerup', 'onpointermove',
+    'ontouchstart', 'ontouchend', 'ontouchmove', 'onload', 'onerror', 'onwheel', 'oncontextmenu', 'ondragstart', 'ondragover', 'ondrop'];
   function convertHandlers(root) {
     var els = root.querySelectorAll ? root.querySelectorAll('*') : [];
     var list = root.attributes ? [root].concat(Array.prototype.slice.call(els)) : Array.prototype.slice.call(els);
@@ -110,6 +143,12 @@
         });
       });
     });
+  }
+  // Resource hints would reach outside the sandbox's network rules (DNS lookups, early connections).
+  function dropHints(root) {
+    var links = root.querySelectorAll ? root.querySelectorAll('link[rel]') : [];
+    Array.prototype.forEach.call(links, function (l) { if (/(pre|dns-)/i.test(l.getAttribute('rel') || '')) l.remove(); });
+    if (root.tagName === 'LINK' && /(pre|dns-)/i.test(root.getAttribute('rel') || '')) root.remove();
   }
 
   // LaTeX written in the interface's text ($…$, $$…$$, \(…\), \[…\]) is rendered with KaTeX, loaded on demand.
@@ -180,10 +219,19 @@
     requestAnimationFrame(function () { mathQueued = false; renderMath(document.body); });
   }
 
-  var lastH = 0;
+  // Height reported to the app: what the content takes, so the frame can also shrink.
+  // Layouts sized by vh grow with the frame itself; a run of small growth steps is treated as that loop and stopped.
+  var lastH = 0, creep = 0, lastGrow = 0;
   function size() {
-    var h = Math.ceil(Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0));
-    if (h !== lastH) { lastH = h; post({ type: 'size', h: h }); }
+    if (!document.body) return;
+    var cs = getComputedStyle(document.body);
+    var h = Math.ceil(document.body.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom));
+    if (h === lastH) return;
+    var now = Date.now();
+    if (h > lastH && h - lastH <= 40 && now - lastGrow < 600) { if (++creep > 6) return; } else creep = 0;
+    if (h > lastH) lastGrow = now;
+    lastH = h;
+    post({ type: 'size', h: h });
   }
 
   function mount() {
@@ -194,15 +242,16 @@
       if (n.nodeType === 1 && /^(META|TITLE|BASE)$/.test(n.tagName)) return;
       document.body.appendChild(document.importNode(n, true));
     });
+    dropHints(document.body);
     convertHandlers(document.body);
     new MutationObserver(function (records) {
       records.forEach(function (r) {
-        if (r.type === 'attributes' && /^on/i.test(r.attributeName)) convertHandlers(r.target);
-        Array.prototype.forEach.call(r.addedNodes || [], function (n) { if (n.nodeType === 1) convertHandlers(n); });
+        if (r.type === 'attributes') convertHandlers(r.target);
+        Array.prototype.forEach.call(r.addedNodes || [], function (n) { if (n.nodeType === 1) { dropHints(n); convertHandlers(n); } });
       });
       mathSoon();
       size();
-    }).observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    }).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: HANDLERS });
 
     // Scripts imported from the parsed document do not run: recreate them, in order, as blob: or CDN scripts.
     var scripts = Array.prototype.slice.call(document.body.querySelectorAll('script'));
